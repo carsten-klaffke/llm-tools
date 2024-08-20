@@ -76,18 +76,17 @@ def translate_text_if_needed(text: str, language: str):
 
     return translated_text
 
-def get_synonyms(word):
+def get_synonyms(word, pos=None, max_synonyms=5):
     synonyms = set()
 
-    # Suche nach Synonymen für das Wort in WordNet
-    for syn in wn.synsets(word):
+    # Suche nach Synonymen basierend auf der angegebenen Wortart (pos) in WordNet
+    for syn in wn.synsets(word, pos=pos):
         for lemma in syn.lemmas():
-            synonyms.add(lemma.name())  # Synonyme hinzufügen
+            if lemma.name() != word:  # Das ursprüngliche Wort nicht einschließen
+                synonyms.add(lemma.name())
 
-    # Das ursprüngliche Wort selbst aus den Synonymen entfernen, falls es enthalten ist
-    synonyms.discard(word)
-
-    return list(synonyms)
+    # Optional: Die Anzahl der Synonyme begrenzen
+    return list(synonyms)[:max_synonyms]
 
 def extract_nouns_with_synonyms(text: str, language: str):
     if language not in nlp_models:
@@ -143,7 +142,6 @@ def extract_keywords_with_synonyms(text: str, language: str, top_n_keywords: int
 
     sorted_keywords = sorted(keywords.items(), key=lambda item: item[1], reverse=True)
     top_keywords = [keyword for keyword, freq in sorted_keywords[:top_n_keywords]]
-
     # Verwenden von TF-IDF zur Bestimmung wichtiger Begriffe
     tfidf = TfidfVectorizer(stop_words='english')
 
@@ -185,7 +183,6 @@ def extract_keywords_with_synonyms(text: str, language: str, top_n_keywords: int
 
     # Kombiniere alle extrahierten Wörter und filtere Stop-Wörter erneut
     combined_keywords = list(set(top_keywords + list(tfidf_keywords) + topic_words))
-
     # Füge Synonyme hinzu
     keywords_with_synonyms = combined_keywords.copy()
     all_synonyms = []
@@ -195,7 +192,6 @@ def extract_keywords_with_synonyms(text: str, language: str, top_n_keywords: int
 
     # Kombiniere die Keywords und die Synonyme, Synonyme hinten anstellen
     final_keywords = keywords_with_synonyms + all_synonyms
-
     # Begrenze die Liste auf maximal 100 Einträge
     final_keywords = final_keywords[:100]
 
@@ -211,10 +207,12 @@ def normalize_keywords(keywords):
         # Verarbeiten des Keywords mit spaCy
         doc = nlp_en(keyword.lower())
 
-        # Noun chunks extrahieren
-        for chunk in doc.noun_chunks:
-            if not chunk.root.is_stop and chunk.root.is_alpha:
-                normalized.append(chunk.lemma_)
+        # Alle Token (nicht nur noun_chunks) durchlaufen
+        for token in doc:
+            # Nimm Substantive oder relevante Verben auf
+            if not token.is_stop and token.is_alpha:
+                if token.pos_ in ['NOUN', 'PROPN', 'VERB']:  # Erfasse Nomen, Eigennamen und Verben
+                    normalized.append(token.lemma_)
 
     # Entfernen von Duplikaten und leeren Strings
     return list(set(filter(None, normalized)))
