@@ -15,13 +15,11 @@ from flask_cors import CORS
 import urllib.parse
 from transformers import pipeline, AutoTokenizer, MarianMTModel, MarianTokenizer
 import sentencepiece
-from queue import Queue
-import threading
 
 nltk.download('punkt')
 
-summarizer = pipeline("summarization", model="t5-small", framework="pt")
-tokenizer = AutoTokenizer.from_pretrained("t5-small")
+summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6", framework="pt")
+tokenizer = AutoTokenizer.from_pretrained("sshleifer/distilbart-cnn-12-6")
 
 # Umgehen der SSL-Zertifikatsüberprüfung
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -37,7 +35,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})  # Erlaubt CORS-Anfragen von allen Quellen
 
 # Pool-Größe (Anzahl der Modelle im Pool)
-POOL_SIZE = 3
+POOL_SIZE = 5
 
 # Spacy-Modelle Map
 spacy_models_map = {
@@ -350,22 +348,20 @@ def normalize_keywords_in_language(keywords, language):
     return list(set(filter(None, normalized)))
 
 
-def chunk_sentences(sentences, language, tokenizer, max_token_length=1024, max_chunks=4, model=None):
+def chunk_sentences(sentences, tokenizer, max_token_length=1024, max_chunks=4):
     chunks = []
     current_chunk = []
     current_length = 0
 
     for sentence in sentences:
-        translated_sentence = translate_text_if_needed(sentence, language, model,
-                                                       tokenizer).strip()  # Entferne überflüssige Leerzeichen
         # Tokenisiere den Satz, um seine Token-Länge zu bestimmen
-        token_ids = tokenizer.encode(translated_sentence, truncation=False)
+        token_ids = tokenizer.encode(sentence, truncation=False)
         token_length = len(token_ids)
 
         # Falls der aktuelle Chunk mit dem Satz die maximale Länge überschreiten würde, Chunk abschließen
         if current_length + token_length > max_token_length:
             # Nutze ".join" mit Sätzen, um doppelte Leerzeichen zu vermeiden
-            chunks.append("".join(current_chunk).strip())  # Entferne Leerzeichen am Ende des Chunks
+            chunks.append(" ".join(current_chunk).strip())  # Entferne Leerzeichen am Ende des Chunks
             current_chunk = []
             current_length = 0
 
@@ -374,25 +370,24 @@ def chunk_sentences(sentences, language, tokenizer, max_token_length=1024, max_c
                 break
 
         # Füge den Satz zum aktuellen Chunk hinzu
-        current_chunk.append(translated_sentence)
+        current_chunk.append(sentence)
         current_length += token_length
 
     # Füge den letzten Chunk hinzu, falls noch ein Rest übrig ist und das Chunk-Limit nicht überschritten wurde
     if current_chunk and len(chunks) < max_chunks:
-        chunks.append("".join(current_chunk).strip())  # Entferne Leerzeichen am Ende des Chunks
+        chunks.append(" ".join(current_chunk).strip())  # Entferne Leerzeichen am Ende des Chunks
 
     return chunks
 
 
-def summarize_large_text(text, language, max_token_length=1024, max_chunks=4):
-    marian_model, tokenizer = marian_pool_manager.get_model(language)
+def summarize_large_text(text, max_token_length=1024, max_chunks=4):
 
     try:
         # Tokenisiere den Text in einzelne Sätze
         sentences = sent_tokenize(text)
 
         # Teile die Sätze in Chunks auf, mit Limit für die Anzahl der Chunks
-        chunks = chunk_sentences(sentences, language, tokenizer, max_token_length, max_chunks, marian_model)
+        chunks = chunk_sentences(sentences, tokenizer, max_token_length, max_chunks)
 
         # Übersetze und fasse nur die Chunks zusammen, die innerhalb der max_chunks-Grenze liegen
         summaries = []
@@ -402,7 +397,7 @@ def summarize_large_text(text, language, max_token_length=1024, max_chunks=4):
             summaries.append(summary_chunk)
 
         # Alle Teilsummen zusammenfügen und erneut zusammenfassen, falls nötig
-        combined_summary = "".join(summaries).strip()  # Entferne überflüssige Leerzeichen am Ende
+        combined_summary = " ".join(summaries).strip()  # Entferne überflüssige Leerzeichen am Ende
         # Optional: Final zusammenfassen, um eine kurze Zusammenfassung der Teilsummen zu erhalten
         final_summary = summarize_text(combined_summary, max_length=256)
         return final_summary
@@ -487,8 +482,9 @@ def summarize_endpoint():
         if token_length <= 256:
             summary = None
         else:
-            # Übergibt das geladene Modell und den Tokenizer an die Methode
-            summary = summarize_large_text(text, language)
+            marian_model, marian_tokenizer = marian_pool_manager.get_model(language)
+            translated_text = translate_text_if_needed(text, language, marian_model, marian_tokenizer)
+            summary = summarize_large_text(translated_text)
 
         # Rückgabe der Zusammenfassung als JSON-Antwort
         return jsonify({"summary": summary}), 200
