@@ -95,13 +95,11 @@ class ModelPoolManager:
                 # Modell aus dem Pool holen und als zuletzt verwendet markieren
                 model = self.model_pool.pop(language)
                 self.model_pool[language] = model  # Setzt es ans Ende (zuletzt verwendet)
-                print(f"{self.name}: Retrieved model for {language} from pool")
                 return model
             else:
                 # Ein neues Modell laden, wenn es nicht im Pool ist
                 model = self.loader_fn(self.models_map[language])
                 self._add_model_to_pool(language, model)
-                print(f"{self.name}: Loaded new model for {language} ({len(self.model_pool)} models loaded)")
                 return model
 
     def _add_model_to_pool(self, language, model):
@@ -109,11 +107,9 @@ class ModelPoolManager:
         if len(self.model_pool) >= self.pool_size:
             # Ältestes Modell (Least Recently Used) entfernen
             oldest_language, oldest_model = self.model_pool.popitem(last=False)
-            print(f"{self.name}: Pool full. Released oldest model for {oldest_language}")
 
         # Das neue Modell zum Pool hinzufügen
         self.model_pool[language] = model
-        print(f"{self.name}: Added model for {language} to pool")
 
 
 # Loader-Funktionen für SpaCy und MarianMT
